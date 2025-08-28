@@ -36,6 +36,8 @@ if not os.path.exists(DB_FILE):
 # FUNÇÕES DE USUÁRIO
 # ======================
 def cadastrar_usuario(username, nome, senha):
+    global usuarios   # tem que vir no início da função
+
     if username in usuarios['username'].values:
         return False, "Usuário já existe!"
 
@@ -49,11 +51,12 @@ def cadastrar_usuario(username, nome, senha):
         'nome': nome,
         'senha': senha_hash
     }])
-    global usuarios
+
     usuarios = pd.concat([usuarios, novo_usuario], ignore_index=True)
     usuarios.to_csv("usuarios.csv", index=False)
 
     return True, "Usuário cadastrado com sucesso!"
+
 
 def autenticar_usuario(username, senha):
     df_users = pd.read_csv(USERS_FILE)
