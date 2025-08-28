@@ -36,14 +36,23 @@ if not os.path.exists(DB_FILE):
 # FUNÇÕES DE USUÁRIO
 # ======================
 def cadastrar_usuario(username, nome, senha):
-    df_users = pd.read_csv(USERS_FILE)
-    if username in df_users["username"].values:
-        return False, "Esse usuário já existe!"
+    if username in usuarios['username'].values:
+        return False, "Usuário já existe!"
 
-    senha_hash = stauth.Hasher([senha]).generate()[0]
-    novo = pd.DataFrame([[username, nome, senha_hash]], columns=["username", "nome", "senha_hash"])
-    df_users = pd.concat([df_users, novo], ignore_index=True)
-    df_users.to_csv(USERS_FILE, index=False)
+    # Gera o hash da senha
+    senha_hash = stauth.Hasher([senha]).generate()
+    senha_hash = senha_hash[0]  # garante que pegamos apenas a string
+
+    # Adiciona o usuário ao "banco"
+    novo_usuario = pd.DataFrame([{
+        'username': username,
+        'nome': nome,
+        'senha': senha_hash
+    }])
+    global usuarios
+    usuarios = pd.concat([usuarios, novo_usuario], ignore_index=True)
+    usuarios.to_csv("usuarios.csv", index=False)
+
     return True, "Usuário cadastrado com sucesso!"
 
 def autenticar_usuario(username, senha):
