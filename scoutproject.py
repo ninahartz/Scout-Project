@@ -11,45 +11,42 @@ import streamlit as st
 import pandas as pd
 import os
 import streamlit_authenticator as stauth
+from PIL import Image
 
-# ======================
-# ARQUIVOS
-# ======================
-USERS_FILE = "usuarios.csv"
-DB_FILE = "projetos.csv"
-IMG_DIR = "fotos"
+# ==============================
+# Carregar ou criar o banco de usuários
+# ==============================
+try:
+    usuarios = pd.read_csv("usuarios.csv")
+except FileNotFoundError:
+    usuarios = pd.DataFrame(columns=["username", "nome", "senha"])
+    usuarios.to_csv("usuarios.csv", index=False)
 
-# Garante a pasta de fotos
-os.makedirs(IMG_DIR, exist_ok=True)
+# ==============================
+# Carregar ou criar o banco de projetos
+# ==============================
+try:
+    projetos = pd.read_csv("projetos.csv")
+except FileNotFoundError:
+    projetos = pd.DataFrame(columns=["usuario", "nome_projeto", "descricao", "area", "foto"])
+    projetos.to_csv("projetos.csv", index=False)
 
-# Cria arquivo de usuários se não existir
-if not os.path.exists(USERS_FILE):
-    df_users = pd.DataFrame(columns=["username", "nome", "senha_hash"])
-    df_users.to_csv(USERS_FILE, index=False)
-
-# Cria arquivo de projetos se não existir
-if not os.path.exists(DB_FILE):
-    df_proj = pd.DataFrame(columns=["Nome", "Autor", "Categoria", "Descrição", "Foto"])
-    df_proj.to_csv(DB_FILE, index=False)
-
-# ======================
-# FUNÇÕES DE USUÁRIO
-# ======================
+# ==============================
+# Função de cadastro de usuário
+# ==============================
 def cadastrar_usuario(username, nome, senha):
-    global usuarios   # tem que vir no início da função
+    global usuarios
 
     if username in usuarios['username'].values:
         return False, "Usuário já existe!"
 
-    # Gera o hash da senha
-    senha_hash = stauth.Hasher([senha]).generate()
-    senha_hash = senha_hash[0]  # garante que pegamos apenas a string
+    # Gera hash da senha
+    senha_hash = stauth.Hasher([senha]).generate()[0]
 
-    # Adiciona o usuário ao "banco"
     novo_usuario = pd.DataFrame([{
-        'username': username,
-        'nome': nome,
-        'senha': senha_hash
+        "username": username,
+        "nome": nome,
+        "senha": senha_hash
     }])
 
     usuarios = pd.concat([usuarios, novo_usuario], ignore_index=True)
@@ -57,124 +54,106 @@ def cadastrar_usuario(username, nome, senha):
 
     return True, "Usuário cadastrado com sucesso!"
 
+# ==============================
+# Função de autenticação
+# ==============================
+def autenticar():
+    global usuarios
+    if usuarios.empty:
+        return None, False, "Nenhum usuário cadastrado."
 
-def autenticar_usuario(username, senha):
-    df_users = pd.read_csv(USERS_FILE)
-    if username not in df_users["username"].values:
-        return False, None
+    credentials = {
+        "usernames": {
+            row["username"]: {
+                "name": row["nome"],
+                "password": row["senha"]
+            } for _, row in usuarios.iterrows()
+        }
+    }
 
-    senha_hash = df_users.loc[df_users["username"] == username, "senha_hash"].values[0]
-    if stauth.Hasher([senha]).check([senha], [senha_hash])[0]:
-        nome = df_users.loc[df_users["username"] == username, "nome"].values[0]
-        return True, nome
-    else:
-        return False, None
+    authenticator = stauth.Authenticate(
+        credentials,
+        "scout_app",
+        "abcdef",
+        cookie_expiry_days=1
+    )
 
-# ======================
-# INTERFACE
-# ======================
-st.set_page_config(page_title="Banco de Projetos Escoteiros", layout="wide")
-st.title("📚 Banco de Projetos Escoteiros")
+    nome, auth_status, username = authenticator.login("Login", "main")
+    return authenticator, nome, auth_status, username
 
-menu = st.sidebar.radio("Menu", ["Login", "Registrar", "Consultar Projetos"])
+# ==============================
+# Função de cadastro de projeto
+# ==============================
+def cadastrar_projeto(usuario, nome_projeto, descricao, area, foto):
+    global projetos
 
-# LOGIN
-if menu == "Login":
-    st.subheader("Login")
-    username = st.text_input("Usuário")
-    senha = st.text_input("Senha", type="password")
+    caminho_foto = ""
+    if foto:
+        caminho_foto = os.path.join("fotos", foto.name)
+        os.makedirs("fotos", exist_ok=True)
+        with open(caminho_foto, "wb") as f:
+            f.write(foto.getbuffer())
 
-    if st.button("Entrar"):
-        ok, nome = autenticar_usuario(username, senha)
-        if ok:
-            st.success(f"Bem-vindo, {nome}!")
+    novo_projeto = pd.DataFrame([{
+        "usuario": usuario,
+        "nome_projeto": nome_projeto,
+        "descricao": descricao,
+        "area": area,
+        "foto": caminho_foto
+    }])
 
-            # Menu interno
-            escolha = st.radio("O que deseja fazer?", ["Cadastrar Projeto", "Consultar Projetos"])
+    projetos = pd.concat([projetos, novo_projeto], ignore_index=True)
+    projetos.to_csv("projetos.csv", index=False)
 
-            if escolha == "Cadastrar Projeto":
-                st.header("Cadastrar novo projeto escoteiro")
+    return True, "Projeto cadastrado com sucesso!"
 
-                nome_proj = st.text_input("Nome do projeto")
-                categoria = st.selectbox("Categoria", ["Meio Ambiente", "Comunidade", "Cultura", "Educação", "Outro"])
-                descricao = st.text_area("Descrição do projeto")
-                foto = st.file_uploader("Adicionar foto do projeto", type=["jpg", "jpeg", "png"])
+# ==============================
+# Streamlit Interface
+# ==============================
+st.sidebar.title("Menu")
+pagina = st.sidebar.radio("Navegar", ["Login", "Cadastro de Usuário", "Projetos"])
 
-                if st.button("Salvar projeto"):
-                    foto_path = ""
-                    if foto is not None:
-                        foto_path = os.path.join(IMG_DIR, f"{nome_proj}_{foto.name}")
-                        with open(foto_path, "wb") as f:
-                            f.write(foto.getbuffer())
-
-                    novo = pd.DataFrame([[nome_proj, nome, categoria, descricao, foto_path]],
-                                        columns=["Nome", "Autor", "Categoria", "Descrição", "Foto"])
-                    df = pd.read_csv(DB_FILE)
-                    df = pd.concat([df, novo], ignore_index=True)
-                    df.to_csv(DB_FILE, index=False)
-                    st.success("Projeto salvo com sucesso!")
-
-            elif escolha == "Consultar Projetos":
-                st.header("Banco de Projetos Escoteiros")
-                df = pd.read_csv(DB_FILE)
-
-                filtro_categoria = st.selectbox("Filtrar por categoria", ["Todas"] + df["Categoria"].unique().tolist())
-                if filtro_categoria != "Todas":
-                    df = df[df["Categoria"] == filtro_categoria]
-
-                if len(df) == 0:
-                    st.info("Nenhum projeto encontrado.")
-                else:
-                    cols = st.columns(3)
-                    for i, (_, row) in enumerate(df.iterrows()):
-                        col = cols[i % 3]
-                        with col:
-                            st.markdown(f"### {row['Nome']}")
-                            st.write(f"👤 {row['Autor']}")
-                            if row["Foto"] and os.path.exists(row["Foto"]):
-                                st.image(row["Foto"], use_container_width=True)
-                            st.caption(f"📂 {row['Categoria']}")
-                            with st.expander("Descrição"):
-                                st.write(row["Descrição"])
-                            st.markdown("---")
-
-        else:
-            st.error("Usuário ou senha incorretos")
-
-# REGISTRO
-elif menu == "Registrar":
-    st.subheader("Registrar novo usuário")
+if pagina == "Cadastro de Usuário":
+    st.title("Cadastro de Usuário")
     new_username = st.text_input("Usuário")
-    new_nome = st.text_input("Nome completo")
+    new_nome = st.text_input("Nome")
     new_senha = st.text_input("Senha", type="password")
 
     if st.button("Cadastrar"):
         ok, msg = cadastrar_usuario(new_username, new_nome, new_senha)
-        if ok:
+        st.success(msg) if ok else st.error(msg)
+
+elif pagina == "Login":
+    st.title("Login")
+    authenticator, nome, auth_status, username = autenticar()
+
+    if auth_status:
+        st.success(f"Bem-vindo, {nome}!")
+        authenticator.logout("Logout", "sidebar")
+
+elif pagina == "Projetos":
+    st.title("Projetos Escoteiros")
+    authenticator, nome, auth_status, username = autenticar()
+
+    if auth_status:
+        st.subheader("Cadastrar Novo Projeto")
+        nome_projeto = st.text_input("Nome do Projeto")
+        descricao = st.text_area("Descrição")
+        area = st.selectbox("Área", ["Ambiental", "Comunitária", "Tecnologia", "Educação", "Outro"])
+        foto = st.file_uploader("Foto do Projeto", type=["jpg", "jpeg", "png"])
+
+        if st.button("Salvar Projeto"):
+            ok, msg = cadastrar_projeto(username, nome_projeto, descricao, area, foto)
             st.success(msg)
-        else:
-            st.error(msg)
 
-# CONSULTAR SEM LOGIN (somente leitura)
-elif menu == "Consultar Projetos":
-    st.header("Banco de Projetos Escoteiros")
-    df = pd.read_csv(DB_FILE)
-    if len(df) == 0:
-        st.info("Nenhum projeto cadastrado ainda.")
+        st.subheader("Projetos Existentes")
+        for _, row in projetos.iterrows():
+            st.markdown(f"### {row['nome_projeto']}")
+            st.write(f"👤 {row['usuario']} | 📂 {row['area']}")
+            st.write(row["descricao"])
+            if row["foto"] and os.path.exists(row["foto"]):
+                st.image(row["foto"], width=300)
+            st.markdown("---")
+
     else:
-        filtro_categoria = st.selectbox("Filtrar por categoria", ["Todas"] + df["Categoria"].unique().tolist())
-        if filtro_categoria != "Todas":
-            df = df[df["Categoria"] == filtro_categoria]
-
-        cols = st.columns(3)
-        for i, (_, row) in enumerate(df.iterrows()):
-            col = cols[i % 3]
-            with col:
-                st.markdown(f"### {row['Nome']}")
-                st.write(f"👤 {row['Autor']}")
-                if row["Foto"] and os.path.exists(row["Foto"]):
-                    st.image(row["Foto"], use_container_width=True)
-                st.caption(f"📂 {row['Categoria']}")
-                with st.expander("Descrição"):
-                    st.write(row["Descrição"])
-                st.markdown("---")
+        st.warning("Faça login para acessar os projetos.")
